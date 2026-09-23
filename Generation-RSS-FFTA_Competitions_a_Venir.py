@@ -1,0 +1,529 @@
+import os
+import sys
+from datetime import date, timedelta
+from html import unescape
+from xml.etree.ElementTree import Element, SubElement, ElementTree
+
+import requests
+from bs4 import BeautifulSoup
+
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+BROWSERLESS_TOKEN = os.environ.get("BROWSERLESS_TOKEN")
+
+if not BROWSERLESS_TOKEN:
+    print("ERREUR : la variable BROWSERLESS_TOKEN est absente.")
+    sys.exit(1)
+
+
+# ============================================================
+# URL FFTA - COMPÉTITIONS À VENIR
+# ============================================================
+
+start_date = date.today()
+end_date = start_date + timedelta(days=365)
+
+FFTA_URL = (
+    "https://www.ffta.fr/competitions"
+    "?search="
+    f"&start={start_date.isoformat()}"
+    f"&end={end_date.isoformat()}"
+    "&dep%5B%5D=58"
+    "&discipline=103"
+    "&univers=299"
+    "&inter=All"
+    "&sort_by=start"
+    "&sort_order=ASC"
+)
+
+print("URL FFTA utilisée :")
+print(FFTA_URL)
+print()
+
+
+# ============================================================
+# BROWSERLESS
+# ============================================================
+
+BROWSERLESS_URL = (
+    "https://production-sfo.browserless.io/scrape"
+    f"?token={BROWSERLESS_TOKEN}"
+)
+
+payload = {
+    "url": FFTA_URL,
+    "elements": [
+        {
+            "selector": "article.competition_item"
+        }
+    ],
+    "waitForSelector": {
+        "selector": "article.competition_item",
+        "timeout": 30000
+    }
+}
+
+
+print("Interrogation de Browserless...")
+
+try:
+    response = requests.post(
+        BROWSERLESS_URL,
+        json=payload,
+        timeout=60
+    )
+except requests.RequestException as e:
+    print("ERREUR lors de la connexion à Browserless :")
+    print(e)
+    sys.exit(1)
+
+
+if response.status_code != 200:
+    print("ERREUR Browserless.")
+    print("Code HTTP :", response.status_code)
+    print(response.text)
+    sys.exit(1)
+
+
+try:
+    result = response.json()
+except ValueError:
+    print("ERREUR : Browserless n'a pas retourné du JSON valide.")
+    print(response.text)
+    sys.exit(1)
+
+
+# ============================================================
+# EXTRACTION DES COMPÉTITIONS
+# ============================================================
+
+data = result.get("data", [])
+
+if not data:
+    print("ERREUR : aucune donnée reçue de Browserless.")
+    sys.exit(1)
+
+
+competition_elements = []
+
+for item in data:
+    if item.get("selector") == "article.competition_item":
+        competition_elements = item.get("results", [])
+        break
+
+
+print("Compétitions trouvées :", len(competition_elements))
+
+
+if not competition_elements:
+    print("ERREUR : aucune compétition trouvée.")
+    sys.exit(1)
+
+
+# ============================================================
+# OUTILS
+# ============================================================
+
+def absolute_url(url):
+    """
+    Transforme une URL relative en URL absolue.
+    """
+
+    if not url:
+        return ""
+
+    if url.startswith("/"):
+        return "https://www.ffta.fr" + url
+
+    return url
+
+
+def find_link(article, wanted_text):
+    """
+    Cherche dans une compétition le lien dont le texte
+    correspond à wanted_text, par exemple 'Mandat' ou 'Détail'.
+    """
+
+    wanted_text = wanted_text.lower().strip()
+
+    for link in article.find_all("a"):
+
+        text = " ".join(link.stripped_strings).strip().lower()
+
+        if text == wanted_text:
+
+            href = link.get("href", "")
+
+            return absolute_url(href)
+
+    return ""
+
+
+# ============================================================
+# CONSTRUCTION DE LA LISTE
+# ============================================================
+
+competitions = []
+
+
+for element in competition_elements:
+
+    html = element.get("html", "")
+
+    if not html:
+        continue
+
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
+    )
+
+
+    # --------------------------------------------------------
+    # TITRE
+    # --------------------------------------------------------
+
+    title_element = soup.select_one(
+        ".competition_item__title"
+    )
+
+    if not title_element:
+        continue
+
+
+    title = " ".join(
+        title_element.stripped_strings
+    ).strip()
+
+
+    if not title:
+        continue
+
+
+    # --------------------------------------------------------
+    # DATE
+    # --------------------------------------------------------
+
+    date_element = soup.select_one(
+        ".competition_item__dates"
+    )
+
+
+    if date_element:
+
+        competition_date = " ".join(
+            date_element.stripped_strings
+        ).strip()
+
+    else:
+
+        competition_date = ""
+
+
+    # --------------------------------------------------------
+    # LIEN DÉTAIL
+    # --------------------------------------------------------
+
+    detail_link = find_link(
+        soup,
+        "Détail"
+    )
+
+
+    # --------------------------------------------------------
+    # LIEN MANDAT
+    # --------------------------------------------------------
+
+    mandat_link = find_link(
+        soup,
+        "Mandat"
+    )
+
+
+    # Une compétition sans lien Détail
+    # n'est pas ajoutée au RSS.
+
+    if not detail_link:
+        continue
+
+
+    # --------------------------------------------------------
+    # AJOUT À LA LISTE
+    # --------------------------------------------------------
+
+    competitions.append(
+        {
+            "title": unescape(title),
+            "date": competition_date,
+            "detail": detail_link,
+            "mandat": mandat_link
+        }
+    )
+
+
+# ============================================================
+# VÉRIFICATION
+# ============================================================
+
+print()
+print(
+    "Compétitions exploitables :",
+    len(competitions)
+)
+
+
+mandat_count = sum(
+    1
+    for competition in competitions
+    if competition["mandat"]
+)
+
+
+print(
+    "Mandats disponibles :",
+    mandat_count
+)
+
+print()
+
+
+# ============================================================
+# AFFICHAGE POUR VÉRIFICATION
+# ============================================================
+
+if not competitions:
+
+    print(
+        "ERREUR : aucune compétition exploitable."
+    )
+
+    print(
+        "Le RSS ne sera pas remplacé."
+    )
+
+    sys.exit(1)
+
+
+print(
+    "Compétitions qui seront placées dans le RSS :"
+)
+
+print()
+
+
+for competition in competitions:
+
+    print(
+        "-",
+        competition["title"]
+    )
+
+    print(
+        "  Date :",
+        competition["date"]
+        if competition["date"]
+        else "non disponible"
+    )
+
+    print(
+        "  Détail :",
+        competition["detail"]
+    )
+
+
+    if competition["mandat"]:
+
+        print(
+            "  Mandat :",
+            competition["mandat"]
+        )
+
+    else:
+
+        print(
+            "  Mandat : non disponible"
+        )
+
+
+    print()
+
+
+# ============================================================
+# CRÉATION DU RSS
+# ============================================================
+
+rss = Element(
+    "rss",
+    {
+        "version": "2.0"
+    }
+)
+
+
+channel = SubElement(
+    rss,
+    "channel"
+)
+
+
+SubElement(
+    channel,
+    "title"
+).text = "FFTA - Compétitions à venir"
+
+
+SubElement(
+    channel,
+    "description"
+).text = (
+    "Calendrier des compétitions FFTA à venir "
+    "pour le département 57."
+)
+
+
+SubElement(
+    channel,
+    "link"
+).text = "https://www.ffta.fr/competitions"
+
+
+SubElement(
+    channel,
+    "language"
+).text = "fr"
+
+
+# ============================================================
+# AJOUT DES COMPÉTITIONS
+# ============================================================
+
+for competition in competitions:
+
+    item = SubElement(
+        channel,
+        "item"
+    )
+
+
+    # --------------------------------------------------------
+    # TITRE
+    # --------------------------------------------------------
+
+    SubElement(
+        item,
+        "title"
+    ).text = competition["title"]
+
+
+    # --------------------------------------------------------
+    # LIEN PRINCIPAL = DÉTAIL
+    # --------------------------------------------------------
+
+    SubElement(
+        item,
+        "link"
+    ).text = competition["detail"]
+
+
+    # --------------------------------------------------------
+    # GUID
+    # --------------------------------------------------------
+
+    SubElement(
+        item,
+        "guid"
+    ).text = competition["detail"]
+
+
+    # --------------------------------------------------------
+    # DESCRIPTION
+    # --------------------------------------------------------
+
+    description_element = SubElement(
+        item,
+        "description"
+    )
+
+    if competition["date"] and competition["mandat"]:
+
+        description_element.text = (
+            competition["date"]
+            + "<br>  Mandat Disponible !"
+        )
+
+    elif competition["date"]:
+
+        description_element.text = competition["date"]
+
+    elif competition["mandat"]:
+
+        description_element.text = "Mandat Disponible !"
+
+    else:
+
+        description_element.text = ""
+        
+# ============================================================
+# ÉCRITURE DU RSS
+# ============================================================
+
+output_file = "FFTA_Competitions_a_Venir.xml"
+
+
+tree = ElementTree(
+    rss
+)
+
+
+tree.write(
+    output_file,
+    encoding="utf-8",
+    xml_declaration=True
+)
+
+
+# ============================================================
+# FIN
+# ============================================================
+
+print()
+print("========================================")
+print("RSS généré avec succès !")
+print("========================================")
+print()
+
+
+print(
+    "Fichier créé :",
+    output_file
+)
+
+
+print()
+
+
+print(
+    f"Période FFTA : {start_date.isoformat()} "
+    f"→ {end_date.isoformat()}"
+)
+
+
+print()
+
+
+print(
+    "Description : date de compétition"
+)
+
+
+print(
+    "              + 'Mandat Disponible !' "
+    "si un mandat existe."
+)
+
+
+print()
