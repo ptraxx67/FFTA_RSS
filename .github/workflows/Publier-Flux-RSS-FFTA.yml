@@ -86,3 +86,20 @@ jobs:
 
       - name: Publier sur GitHub Pages
         uses: actions/deploy-pages@v4
+
+      - name: Envoyer les flux vers le cache
+        env:
+          CACHE_TOKEN: ${{ secrets.CACHE_TOKEN }}
+          CACHE_URL: ${{ secrets.Adresse }}
+        run: |
+          curl -s "https://www.ffta.fr/rss.xml" \
+            | curl -s -X POST "${CACHE_URL}/rss_cache_upload.php?feed=news" \
+                   -H "X-Cache-Token: ${CACHE_TOKEN}" --data-binary @-
+
+          curl -s "https://ptraxx67.github.io/FFTA_RSS/FFTA_Resultats_Competitions.xml" \
+            | curl -s -X POST "${CACHE_URL}/rss_cache_upload.php?feed=resultats" \
+                   -H "X-Cache-Token: ${CACHE_TOKEN}" --data-binary @-
+
+          curl -s "https://ptraxx67.github.io/FFTA_RSS/FFTA_Competitions_a_Venir.xml" \
+            | curl -s -X POST "${CACHE_URL}/rss_cache_upload.php?feed=competition" \
+                   -H "X-Cache-Token: ${CACHE_TOKEN}" --data-binary @-
