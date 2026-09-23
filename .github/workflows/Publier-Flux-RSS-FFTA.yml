@@ -97,9 +97,9 @@ jobs:
                    -H "X-Cache-Token: ${CACHE_TOKEN}" --data-binary @-
 
           curl -s "https://ptraxx67.github.io/FFTA_RSS/FFTA_Resultats_Competitions.xml" \
-            | curl -s -X POST "${CACHE_URL}/rss_cache_upload.php?feed=resultats" \
+            | curl -s -X POST "${CACHE_URL}/rss_cache_upload.php?feed=Resultats_Competitions" \
                    -H "X-Cache-Token: ${CACHE_TOKEN}" --data-binary @-
 
           curl -s "https://ptraxx67.github.io/FFTA_RSS/FFTA_Competitions_a_Venir.xml" \
-            | curl -s -X POST "${CACHE_URL}/rss_cache_upload.php?feed=competition" \
+            | curl -s -X POST "${CACHE_URL}/rss_cache_upload.php?feed=Competitions_a_Venir" \
                    -H "X-Cache-Token: ${CACHE_TOKEN}" --data-binary @-
