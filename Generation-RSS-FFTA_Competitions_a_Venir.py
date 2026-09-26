@@ -438,6 +438,19 @@ for competition in competitions:
         "guid"
     ).text = competition["detail"]
 
+     # --------------------------------------------------------
+    # LIEN MANDAT
+    # --------------------------------------------------------
+    # Le lien est exposé dans un champ RSS personnalisé.
+    # Cela permet aux lecteurs RSS / scripts de récupérer
+    # directement l'URL du mandat.
+
+    if competition["mandat"]:
+
+        SubElement(
+            item,
+            "mandat"
+        ).text = competition["mandat"]
 
     # --------------------------------------------------------
     # DESCRIPTION
